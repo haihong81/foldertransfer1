@@ -1,0 +1,4 @@
+﻿--用如下格式添加源文件夹及目标文件夹，中间用tab区隔。
+--E:\sourcepath	F:\bakpath
+
+D:\test	D:\test1
