@@ -12,18 +12,23 @@ namespace bakfolders
         private static string tasksFile = "[tasks].txt";
         private static string logFile = "log.txt";
         private static string taskHistoryFile = "taskshistory.txt";
-        private static string tasksResultFile = "tasksresult.txt";
+        private static string tasksResultFile = "tasksresultfiles.txt";
+        private static string tasksSourceFile = "taskssourcefiles.txt";
 
         static void Main(string[] args)
         {
+
             //命令行参数 -c 是否拷贝后比较源文件夹与目标文件夹差异，目标文件中没有的都拷贝过去。默认为false
-            var checkResult = args.Any(b => b.Trim().Contains("-c"));
+            var checkResult = args.Any(b => b.Equals("-c"));
 
             //命令行参数 -h 显示帮助。默认为false
-            var showHelp = args.Any(b => b.Trim().Contains("-h"));
+            var showHelp = args.Any(b => b.Equals("-h"));
 
-            //命令行参数 -g 是否生成目标文件夹中的文件列表，以便拷贝前比对,也可省略此步骤直接执行。默认为false
-            var generateTargetFoldersExitingFilesList = args.Any(b => b.Trim().Contains("-g"));
+            //命令行参数 -s 生成目标文件夹中的文件列表。默认为false
+            var generateSourceFilesList = args.Any(b => b.Equals("-s"));
+
+            //命令行参数 -r 生成目标文件夹中的文件列表。默认为false
+            var generateResultFilesList = args.Any(b => b.Equals("-r"));
 
             if (showHelp)
             {
@@ -41,17 +46,27 @@ namespace bakfolders
             }
 
             // tasks.txt文件中可加入注释。以"--"开头的行均为注释行
-            var tasks = File.ReadAllLines(tasksFile).Where(p => p != "" && !p.Trim().StartsWith("--")).Select(p => p.Trim());
+            var tasks = File.ReadAllLines(tasksFile).AsParallel().Where(p => p != "" && !p.Trim().StartsWith("--")).Select(p => p.Trim()).ToList();
 
-            if (generateTargetFoldersExitingFilesList)
+
+            if (generateSourceFilesList)
+            {
+                GenerateTasksSourceFile(tasks);
+                Console.WriteLine("生成目标文件夹文件列表 taskssourcefiles.txt 完毕！");
+                return;
+            }
+
+            if (generateResultFilesList)
             {
                 GenerateTasksResultFile(tasks);
-                Console.WriteLine("生成目标文件夹文件列表taskresult.txt完毕！");
+                Console.WriteLine("生成目标文件夹文件列表 tasksresultfiles.txt 完毕！");
                 return;
             }
 
             var startTime = DateTime.Now.ToString();
+            Console.WriteLine();
             Console.WriteLine("*** 任务开始时间：" + startTime);
+            Console.WriteLine();
 
             var copiedFilesCount = CopyDirectories(tasks, checkResult);
 
@@ -59,12 +74,16 @@ namespace bakfolders
             //GenerateTasksResultFile(tasks);
 
             var endTime = DateTime.Now.ToString();
-            WriteLogs(tasks, copiedFilesCount, startTime, endTime);
 
             Console.WriteLine("*** 任务结束时间：" + endTime);
-            Console.WriteLine("全部任务合计拷贝文件总数量：    " + copiedFilesCount);
-            //Console.WriteLine("点击任意键退出!");
-            //Console.ReadKey();
+            Console.WriteLine("*** 任务合计拷贝文件总数量：    " + copiedFilesCount);
+            Console.WriteLine();
+
+            WriteLogs(tasks, copiedFilesCount, startTime, endTime);
+
+            Console.WriteLine("点击任意键退出!");
+            Console.WriteLine();
+            Console.ReadKey();
         }
 
         private static int CopyDirectories(IEnumerable<string> directories, bool checkresult)
@@ -89,6 +108,7 @@ namespace bakfolders
                 var lastSameTask = File.ReadAllLines(taskHistoryFile).LastOrDefault(h => h.StartsWith(directory));
 
                 var allSourceFiles = Directory.GetFiles(sourcePath, "*", SearchOption.AllDirectories);
+                //var allSourceFiles = new DirectoryInfo(sourcePath).GetFiles("*", SearchOption.AllDirectories);
 
                 var allSourceFilesCount = allSourceFiles.Count();
 
@@ -104,20 +124,20 @@ namespace bakfolders
                     continue;
                 }
 
-                //todo 拷贝文件为空，需检查原因
                 IEnumerable<string> realShouldCopyFiles = Enumerable.Empty<string>();
                 IEnumerable<string> existingTargetFiles = Enumerable.Empty<string>();
 
                 //上次有相同任务，则上次任务后更新的文件全部拷贝，没有相同任务则全部拷贝
-                // 这里读取文件列表的速度和从文件夹读取文件列表的速度，需要测试，估计差异较小
-                //if (File.Exists(tasksResultFile))
-                //{
-                //    existingTargetFiles = File.ReadAllLines(tasksResultFile).Where(f => f.StartsWith(targetPath)).AsParallel();
-                //}
-                //else
-                //{
-                existingTargetFiles = GetExitingFiles(targetPath);
-                //}
+                // 这里从文件读取文件列表的速度和从文件夹读取文件列表的速度，需要测试!!!，估计差异较小
+                if (File.Exists(tasksResultFile))
+                {
+                    // .ToArray()读取一次，留存在内存中，不每次从文件读取
+                    existingTargetFiles = File.ReadAllLines(tasksResultFile).AsParallel().Where(f => f.StartsWith(targetPath)).ToArray();
+                }
+                else
+                {
+                    existingTargetFiles = GetExitingFiles(targetPath);
+                }
 
                 //  获取上次拷贝任务，检查是否有相同任务 如果有则只拷贝上次任务后更新的文件 
                 if (lastSameTask != null)
@@ -142,10 +162,10 @@ namespace bakfolders
 
                     //  获取上次拷贝任务，检查是否有相同任务 如果没有相同任务执行过 则检查已拷贝文件列表，拷贝新文件及更新的文件
                     //  根据目标目录文件列表，生成源文件名称及目标文件更新时间列表
-                    var generatedSourceFileNamesWithTime = existingTargetFiles.Select(f => f.Replace(targetPath, sourcePath)).AsParallel();
+                    var generatedSourceFileNamesWithTime = existingTargetFiles.AsParallel().Select(f => f.Replace(targetPath, sourcePath));
 
                     // 生成源文件名称列表
-                    var generatedSourceFileNames = generatedSourceFileNamesWithTime.Select(f => f.Split('\t')[0]);
+                    var generatedSourceFileNames = generatedSourceFileNamesWithTime.AsParallel().Select(f => f.Split('\t')[0]);
 
                     //源目录全部文件排除目标目录已有相同名称的文件，为新文件，需全部拷贝
                     var newFiles = allSourceFiles.Except(generatedSourceFileNames);
@@ -174,7 +194,7 @@ namespace bakfolders
                     string targetFilePath = sourcefile.Replace(sourcePath, targetPath);
                     if (!File.Exists(targetFilePath) || File.GetLastWriteTime(targetFilePath) < File.GetLastWriteTime(sourcefile))
                     {
-                        if (!Directory.GetParent(targetFilePath).Exists) CreateDirectory(Directory.GetParent(targetFilePath).FullName);
+                        Directory.CreateDirectory(Directory.GetParent(targetFilePath).FullName);
                         try
                         {
                             File.Copy(sourcefile, targetFilePath, true);
@@ -191,16 +211,16 @@ namespace bakfolders
                 // 复查复制结果 拷贝目标文件夹中尚不存在的文件，达到全面相同的目标
                 if (checkresult)
                 {
-                    var shouldExistSourceFiles = existingTargetFiles.Select(f => f.Split('\t')[0].Replace(targetPath, sourcePath)).AsParallel();
+                    var shouldExistSourceFiles = existingTargetFiles.AsParallel().Select(f => f.Split('\t')[0].Replace(targetPath, sourcePath));
 
-                    var notExistFiles = allSourceFiles.AsParallel().Except(shouldExistSourceFiles);
+                    var notExistFiles = allSourceFiles.Except(shouldExistSourceFiles);
 
                     Console.WriteLine(" 全部检查，共需拷贝目标文件夹不存在的文件数量：  " + notExistFiles.Count());
 
                     Parallel.ForEach(notExistFiles, parallelOptions, sourceFilePath =>
                     {
                         string targetFilePath = sourceFilePath.Replace(sourcePath, targetPath);
-                        if (!Directory.GetParent(targetFilePath).Exists) CreateDirectory(Directory.GetParent(targetFilePath).FullName);
+                        Directory.CreateDirectory(Directory.GetParent(targetFilePath).FullName);
                         try
                         {
                             File.Copy(sourceFilePath, targetFilePath, true);
@@ -211,6 +231,10 @@ namespace bakfolders
                         }
                     });
                 }
+
+                Console.WriteLine(sourcePath + " --> " + targetPath + "   全部目标文件数量：" + GetExitingFiles(targetPath).Count());
+                Console.WriteLine();
+
                 //保存任务历史
                 File.AppendAllLines(taskHistoryFile, new List<string> { directory + "\t" + taskStartTime });
                 count += countD;
@@ -218,21 +242,35 @@ namespace bakfolders
             return count;
         }
 
+
         private static void GenerateTasksResultFile(IEnumerable<string> tasks)
         {
             File.Create(tasksResultFile).Close();
-            File.AppendAllLines(tasksResultFile, GetExitingFilesForTasks(tasks));
-            Console.WriteLine("目标文件夹共有文件数量：" + GetExitingFilesForTasks(tasks).Count());
+            var list = GetExitingFilesForTasks(tasks, 1);
+            File.AppendAllLines(tasksResultFile, list);
+            Console.WriteLine("目标文件夹共有文件数量：" + list.Count());
+        }
+        private static void GenerateTasksSourceFile(IEnumerable<string> tasks)
+        {
+            File.Create(tasksSourceFile).Close();
+            var list = GetExitingFilesForTasks(tasks, 0);
+            File.AppendAllLines(tasksSourceFile, list);
+            Console.WriteLine("来源文件夹共有文件数量：" + list.Count());
         }
 
-        private static IEnumerable<string> GetExitingFilesForTasks(IEnumerable<string> tasks)
+        private static IEnumerable<string> GetExitingFilesForTasks(IEnumerable<string> tasks, int i)
         {
             //保存已拷贝文件列表及文件变更时间
             IEnumerable<string> exitingFiles = Enumerable.Empty<string>();
+            SortedSet<string> distinctPaths = new SortedSet<string>();
             foreach (var path in tasks)
             {
-                var targetpath = path.Split('\t')[1];
-                exitingFiles = exitingFiles.Concat(GetExitingFiles(targetpath));
+                var targetpath = path.Split('\t')[i];
+                distinctPaths.Add(targetpath);
+            }
+            foreach (var path in distinctPaths)
+            {
+                exitingFiles = exitingFiles.Concat(GetExitingFiles(path));
             }
             return exitingFiles;
         }
@@ -241,52 +279,12 @@ namespace bakfolders
         {
             if (Directory.Exists(path))
             {
-                return new DirectoryInfo(path).GetFiles("*", SearchOption.AllDirectories).Select(f => f.FullName + "\t" + f.LastWriteTime).AsParallel();
+                // .ToArray()读取一次，留存在内存中，不每次从文件读取
+                return new DirectoryInfo(path).GetFiles("*", SearchOption.AllDirectories).AsParallel().Select(f => f.FullName + "\t" + f.LastWriteTime).ToArray();
             }
-            else
-            {
-                return Enumerable.Empty<string>();
-            }
+            return Enumerable.Empty<string>();
         }
 
-        //循环创建父文件夹路径
-        private static void CreateDirectory(string directoryname)
-        {
-            if (Directory.GetParent(directoryname).Exists)
-            {
-                Directory.CreateDirectory(directoryname);
-                return;
-            }
-            var parentPath = Directory.GetParent(directoryname).FullName;
-            if (!Directory.Exists(parentPath))
-            {
-                CreateDirectory(parentPath);
-                Directory.CreateDirectory(parentPath);
-            }
-            Directory.CreateDirectory(directoryname);
-        }
-
-        private static void ShowHelp()
-        {
-            Console.WriteLine("\n\n\t\t 使用帮助（建议操作顺序）：\n\n" +
-                    "1.在本程序相同目录下的[tasks].txt文件中设置文件夹拷贝任务，一行一个任务，可以多行，每行格式示例：\n" +
-                    "D:\\source\\path   E:\\target\\path\n" +
-                    "中间用tab分割。\n\n" +
-                    "2.第一次执行，建议首先生成目标文件夹文件列表taskresult.txt，加快比较速度（也可不执行），命令如下： \n" +
-                    "bakfolders -g\n" +
-                    "后续每次任务结束会自动更新taskresult.txt文件，以供下次比较使用。此命令不需多次执行。\n\n" +
-                    "3.日常备份中，双击bakfolders.exe文件或命令行执行，命令如下： \n" +
-                    "bakfolders\n\n" +
-                    "4.命令执行完毕，会追加日志到 log.txt，记录任务历史到任务历史文件 taskhistory.txt\n" +
-                    "若历史文件中存在相同任务，则下次执行命令时会检查相同任务上次执行的时点，只拷贝该时点后更新或新增的文件，\n" +
-                    "所以可能存在新增的该时点前的文件不会被拷贝的情况！\n\n" +
-                    "5.若需全面检查执行目标文件夹并拷贝目标文件夹中不存在的文件，即不以上次任务时间为增量备份的标准，\n" +
-                    "以达到充分拷贝全部文件的目的，则增加拷贝后检查步骤，命令如下： \n" +
-                    "bakfolders -c\n\n" +
-                    " * 天天开心 ：） \n\n" +
-                    "审计信息化QQ群: 256912702\n\n"
-                );
-        }
 
         private static void WriteLogs(IEnumerable<string> paths, int count, string startTime, string endTime)
         {
@@ -317,9 +315,7 @@ namespace bakfolders
             // Get information about the source directory
             var sourcedir = new DirectoryInfo(sourceDir);
             if (!sourcedir.Exists) return 0;
-
             Directory.CreateDirectory(destinationDir);
-
             ParallelOptions parallelOptions = new ParallelOptions();
             parallelOptions.MaxDegreeOfParallelism = 4;
             Parallel.ForEach(sourcedir.GetFiles(), parallelOptions, sourcefile =>
@@ -335,15 +331,37 @@ namespace bakfolders
                 {
                 }
             });
-
             Parallel.ForEach(sourcedir.GetDirectories(), parallelOptions, subDir =>
             {
                 string subDestinationDir = Path.Combine(destinationDir, subDir.Name);
                 Interlocked.Add(ref filesCopiedCount, CopyDirectory(subDir.FullName, subDestinationDir));
             });
-
             return filesCopiedCount;
         }
+
+        private static void ShowHelp()
+        {
+            Console.WriteLine("\n\n\t\t 使用帮助（建议操作顺序）：\n\n" +
+                    "1.在本程序相同目录下的[tasks].txt文件中设置文件夹拷贝任务，一行一个任务，可以多行，每行格式示例：\n" +
+                    "D:\\source\\path   E:\\target\\path\n" +
+                    "中间用tab分割。\n\n" +
+                    "2.日常备份中，双击bakfolders.exe文件或命令行执行，命令如下： \n" +
+                    ".\bakfolders\n\n" +
+                    "3.命令执行完毕，会追加日志到 log.txt，记录任务历史到任务历史文件 taskhistory.txt\n" +
+                    "若历史文件中存在相同任务，则下次执行命令时会检查相同任务上次执行的时点，只拷贝该时点后更新或新增的文件，\n" +
+                    "所以可能存在新增的该时点前的文件不会被拷贝的情况！\n\n" +
+                    "4.若需全面检查执行目标文件夹并拷贝目标文件夹中不存在的文件，即不以上次任务时间为增量备份的标准，\n" +
+                    "以达到充分拷贝全部文件的目的，则增加拷贝后检查步骤，命令如下： \n" +
+                    ".\bakfolders -c\n\n" +
+                    "5.生成来源文件夹文件列表 taskssourcefiles.txt，可不执行，命令如下： \n" +
+                    ".\bakfolders -s\n\n" +
+                    "6.生成目标文件夹文件列表 tasksresultfiles.txt，可不执行，命令如下： \n" +
+                    ".\bakfolders -r\n\n" +
+                    " * 天天开心 ：） \n\n" +
+                    "审计信息化QQ群: 256912702\n\n"
+                );
+        }
+
     }
 }
 

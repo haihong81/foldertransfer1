@@ -97,7 +97,7 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="bakfolders.ico" />
-    <Content Include="tasks.txt">
+    <Content Include="[tasks].txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
